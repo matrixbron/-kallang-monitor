@@ -1,13 +1,12 @@
-yaml
-name: Court Monitor
+name: Kallang Tennis Court Monitor
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
-  workflow_dispatch: {}
+    - cron: "*/5 * * * *"    # every 5 minutes (GitHub may delay this under load)
+  workflow_dispatch: {}       # lets you trigger a manual run from the Actions tab
 
 permissions:
-  contents: write
+  contents: write            # needed so the workflow can commit the updated snapshot
 
 concurrency:
   group: kallang-monitor
@@ -24,19 +23,19 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r kallang-monitor/requirements.txt
 
       - name: Run monitor
         env:
           KALLANG_BEARER_TOKEN: ${{ secrets.KALLANG_BEARER_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python scripts/monitor.py
+        run: python kallang-monitor/scripts/monitor.py
 
       - name: Commit updated snapshot
         run: |
           git config user.name "kallang-monitor-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add state/
+          git add kallang-monitor/state/
           git diff --cached --quiet || git commit -m "Update court availability snapshot"
           git push
