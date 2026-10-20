@@ -17,7 +17,8 @@ import os
 import sys
 import json
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -35,6 +36,10 @@ ZONE_TYPES = {
 WINDOW_DAYS = 7   # you can only book 7 days ahead, so only watch today .. today+7
 DAYS_AHEAD = 7    # scan range (2 API calls per zone type cover it)
 STEP_DAYS = 6     # each API call returns about a 6-day window
+
+SG = ZoneInfo("Asia/Singapore")       # GitHub runners use UTC; Kallang uses SG time
+BOOKING_ADVANCE = timedelta(days=6)   # a slot opens for booking this long before it starts
+LAG_BUFFER = timedelta(minutes=45)    # tolerance for late scheduler runs
 
 STATE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "state")
 
@@ -109,7 +114,7 @@ def extract_availability(data: dict) -> dict:
 
 def scan_zone(zone_type_id: int) -> dict:
     merged: dict[str, set[str]] = {}
-    today = date.today()
+    today = datetime.now(SG).date()
     cursor = today
     while (cursor - today).days < DAYS_AHEAD:
         data = fetch_window(zone_type_id, cursor)
@@ -135,6 +140,16 @@ def save_state(path: str, state: dict) -> None:
         json.dump(state, f, indent=2, sort_keys=True)
 
 
+def is_real_release(day: str, hour: str) -> bool:
+    """True if this slot's normal opening time has already passed.
+
+    Slots open hour by hour, so a slot at the far edge of the window that
+    just appeared is routine rollout, not a quietly released court.
+    """
+    start = datetime.fromisoformat(f"{day}T{hour}:00").replace(tzinfo=SG)
+    return start < datetime.now(SG) + BOOKING_ADVANCE - LAG_BUFFER
+
+
 def diff_newly_available(old: dict, new: dict) -> list[tuple[str, str]]:
     newly = []
     for day, hours in new.items():
@@ -144,7 +159,7 @@ def diff_newly_available(old: dict, new: dict) -> list[tuple[str, str]]:
             continue
         old_hours = set(old.get(day, []))
         for h in hours:
-            if h not in old_hours:
+            if h not in old_hours and is_real_release(day, h):
                 newly.append((day, h))
     newly.sort()
     return newly
